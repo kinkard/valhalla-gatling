@@ -35,6 +35,14 @@ struct Request {
 async fn main() {
     let cli = Cli::parse();
 
+    // Test cli.url against `/status` endpoint to ensure the server is running
+    let status = reqwest::get(format!("{}/status", cli.url)).await;
+    assert!(
+        status.is_ok_and(|r| r.status().is_success()),
+        "{}/status failed",
+        cli.url
+    );
+
     let requests: Arc<[Request]> = parse_tcpdump(cli.playbook)
         .expect("Failed to parse playbook")
         .into();
