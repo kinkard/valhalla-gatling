@@ -1,4 +1,4 @@
-FROM rust:alpine as builder
+FROM rust:alpine AS builder
 
 # Dependencies for some crates and AWS CLI to simplify downloading files from S3
 RUN apk add --no-cache alpine-sdk openssl-dev openssl-libs-static aws-cli
@@ -18,7 +18,7 @@ COPY build.rs .
 RUN touch -a -m ./src/main.rs
 RUN cargo build --release
 
-FROM alpine as runtime
+FROM alpine AS runtime
 COPY --from=builder /usr/src/app/target/release/valhalla-gatling /usr/local/bin/valhalla-gatling
 # CMD ["valhalla-gatling"]
 # Do nothing, just keep the container running
