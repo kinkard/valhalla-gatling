@@ -1532,8 +1532,6 @@ dependencies = [
  "protobuf",
  "protobuf-codegen",
  "reqwest",
- "serde",
- "serde_json",
  "tokio",
 ]
 
