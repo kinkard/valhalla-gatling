@@ -4,7 +4,6 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use pcap_parser::traits::PcapReaderIterator;
 use pcap_parser::*;
-use protobuf::well_known_types::duration;
 use protobuf::Message;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest::Method;
@@ -38,15 +37,9 @@ struct Request {
 async fn main() {
     let cli = Cli::parse();
 
-    let start = std::time::Instant::now();
     let requests: Arc<[Request]> = parse_tcpdump(cli.playbook)
         .expect("Failed to parse playbook")
         .into();
-    println!(
-        "Parsed {} requests in {}ms",
-        requests.len(),
-        start.elapsed().as_millis()
-    );
 
     let client = reqwest::Client::new();
 
@@ -112,10 +105,12 @@ async fn main() {
 
 /// Parses the TCP header and extracts the HTTP request payload if present.
 fn get_tcp_data(data: &[u8]) -> Option<&[u8]> {
-    // Seems tcpdump adds 2 bytes of something to the Ethernet frame, this is why we check 14th and 15th bytes
-    // instead of 12th and 13th bytes as per Ethernet standard.
     let tcp_packet = if u16::from_be_bytes([data[14], data[15]]) == 0x0800 {
+        // For `-i any` tcpdump adds 2 bytes of something to the Ethernet frame
         &data[16..]
+    } else if u16::from_be_bytes([data[12], data[13]]) == 0x0800 {
+        // In regular Ethernet frames the Ethernet header is 14 bytes long
+        &data[14..]
     } else {
         println!("Not a Ethernet Type II frame start: {:02x?}.", &data[..16]);
         return None;
@@ -148,6 +143,9 @@ fn parse_tcpdump(path: String) -> Result<Vec<Request>> {
     let mut reader = LegacyPcapReader::new(65536, file).context("Failed to read pcap file")?;
     let mut requests = vec![];
 
+    // Array of timestamps to calculate the requests per second
+    let mut timestamps = vec![];
+
     loop {
         match reader.next() {
             Ok((offset, data)) => {
@@ -157,6 +155,10 @@ fn parse_tcpdump(path: String) -> Result<Vec<Request>> {
                             if let proto::options::options::Action::route =
                                 api.options.action.enum_value_or_default()
                             {
+                                // Convert the timestamp to microseconds
+                                timestamps
+                                    .push(block.ts_sec as u64 * 1_000_000 + block.ts_usec as u64);
+
                                 // todo: actually, parse headers from the previous tcp packet
                                 requests.push(Request {
                                     method: Method::GET,
@@ -190,5 +192,46 @@ fn parse_tcpdump(path: String) -> Result<Vec<Request>> {
         }
     }
 
+    let duration_s =
+        (timestamps.last().unwrap_or(&0) - timestamps.first().unwrap_or(&0)) as f64 / 1_000_000.0;
+    let peak_rps = count_peak_rps(timestamps);
+    println!(
+        "Parsed {} requests ({duration_s:.1}s), average {:.2}rps, peak {peak_rps}rps",
+        requests.len(),
+        requests.len() as f64 / duration_s,
+    );
+
     Ok(requests)
+}
+
+fn count_peak_rps(mut timestamps: Vec<u64>) -> usize {
+    timestamps.sort();
+
+    let mut max_rps = 0;
+    let mut start = 0;
+
+    for end in 0..timestamps.len() {
+        // Move the start pointer to maintain a 1-second window
+        while timestamps[end] - timestamps[start] > 1_000_000 {
+            start += 1;
+        }
+
+        // Calculate the number of requests in the current window
+        let current_rps = end - start + 1;
+        if current_rps > max_rps {
+            max_rps = current_rps;
+        }
+    }
+
+    max_rps
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn count_peak_rps_test() {
+        assert_eq!(count_peak_rps(vec![]), 0);
+    }
 }
