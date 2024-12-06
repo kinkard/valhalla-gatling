@@ -1,7 +1,5 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
 use pcap_parser::traits::PcapReaderIterator;
 use pcap_parser::*;
 use protobuf::Message;
@@ -43,63 +41,94 @@ async fn main() {
 
     let client = reqwest::Client::new();
 
-    for concurrency in [1, 4, 8, 16, 32, 64, 128] {
-        let start = std::time::Instant::now();
-        // Do concurrency via tasks to eleminate possible bottlenecks at the client side.
-        let tasks: FuturesUnordered<_> = (0..concurrency)
-            .map(|task_idx| {
-                let client = client.clone();
-                let url = cli.url.clone();
-                let requests = requests.clone();
+    let concurrency_levels = [4, 6, 8, 12, 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96];
+    let max_concurrency = concurrency_levels.last().cloned().unwrap();
+    let mut tasks = Vec::new();
 
-                tokio::spawn(async move {
-                    let mut results = Vec::new();
-                    for r in requests.iter().skip(task_idx).step_by(concurrency).take(50) {
-                        let start = std::time::Instant::now();
-                        let result = client
-                            .request(r.method.clone(), &url)
-                            .headers(r.headers.clone())
-                            .body(r.body.clone())
-                            .send()
-                            .await;
-                        let ok = result.is_ok_and(|r| r.status().is_success());
-                        results.push((ok, start.elapsed()));
+    let (results_tx, results_rx) = flume::unbounded::<Option<std::num::NonZeroU32>>();
+
+    for concurrency in concurrency_levels {
+        println!("Concurrency {}, warming up...", concurrency);
+        // Gradually increase number of concurrent requests
+        for tasl_idx in tasks.len()..concurrency {
+            let client = client.clone();
+            let url = cli.url.clone();
+            let requests = requests.clone();
+            let results_tx = results_tx.clone();
+
+            tasks.push(tokio::spawn(async move {
+                // Avoid duplicate requests by cycling through the requests array
+                let requests = requests
+                    .iter()
+                    .cycle()
+                    .skip(tasl_idx)
+                    .step_by(max_concurrency);
+                for r in requests {
+                    let start = std::time::Instant::now();
+                    let result = client
+                        .request(r.method.clone(), &url)
+                        .headers(r.headers.clone())
+                        .body(r.body.clone())
+                        .send()
+                        .await;
+                    let elapsed = start.elapsed().as_micros();
+                    let latency = if result.is_ok_and(|r| r.status().is_success()) {
+                        Some(std::num::NonZeroU32::new(elapsed as u32).unwrap())
+                    } else {
+                        None
+                    };
+
+                    // Channel has been closed, stop sending results and exit the task
+                    if let Err(_) = results_tx.send(latency) {
+                        break;
                     }
-                    results
-                })
-            })
-            .collect();
+                }
+            }));
+        }
 
-        let mut all_results = tasks
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .flatten()
-            .flatten()
-            .collect::<Vec<_>>();
+        // First 15s read all results and throw them away
+        let start = std::time::Instant::now();
+        while let Ok(_latency) = results_rx.recv() {
+            if start.elapsed().as_secs() >= 15 {
+                break;
+            }
+        }
 
-        // count p50, p90, p99 of the response times
-        // count the number of successful requests
-        // count the number of failed requests
+        // Then read the results for 15s and count the success rate, throughput and p50, p95, p99 latency
+        let start = std::time::Instant::now();
+        let mut successfull = 0;
+        let mut total = 0;
+        let mut latencies = Vec::new();
+        while let Ok(latency) = results_rx.recv() {
+            total += 1;
+            if let Some(latency) = latency {
+                successfull += 1;
+                latencies.push(latency.get());
+            }
+            let elapsed = start.elapsed();
+            if elapsed.as_secs() >= 15 {
+                println!(
+                    "- Throughput: {:.2}rps ({}/{:.2}s), success rate {:.2}",
+                    total as f64 / elapsed.as_secs_f64(),
+                    total,
+                    elapsed.as_secs_f64(),
+                    successfull as f64 / total as f64
+                );
+                break;
+            }
+        }
+        latencies.sort_unstable();
+        let p50 = latencies[(latencies.len() as f64 * 0.50) as usize] as f64 / 1000.0;
+        let p95 = latencies[(latencies.len() as f64 * 0.95) as usize] as f64 / 1000.0;
+        let p99 = latencies[(latencies.len() as f64 * 0.99) as usize] as f64 / 1000.0;
+        println!("- Latency p50: {p50}ms, p95: {p95}ms, p99: {p99}s");
+    }
 
-        all_results.sort_by(|lha, rha| lha.1.cmp(&rha.1));
-        let p50 = all_results[(all_results.len() as f64 * 0.50) as usize]
-            .1
-            .as_millis();
-        let p95 = all_results[(all_results.len() as f64 * 0.95) as usize]
-            .1
-            .as_millis();
-        let p99 = all_results[(all_results.len() as f64 * 0.99) as usize]
-            .1
-            .as_millis();
-        let total = all_results.len();
-        let successfull = all_results.iter().filter(|r| r.0).count();
-
-        println!(
-            "Concurrency {concurrency}: Sent {total} requests in {:.1}s. Success rate {:.2}, latency p50 {p50}ms, p95 {p95}ms, p99 {p99}ms",
-            start.elapsed().as_secs_f64(),
-            successfull as f64 / total as f64,
-        );
+    // Close the channel to stop all tasks
+    drop(results_tx);
+    drop(results_rx);
+    for t in tasks {
+        t.await.expect("Task panicked");
     }
 }
 
