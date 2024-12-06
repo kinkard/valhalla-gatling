@@ -49,12 +49,13 @@ async fn main() {
 
     let client = reqwest::Client::new();
 
+    // Doing concurrent requests via spawning tasks allows us to
+    // - gradually increase the number of concurrent requests without pauses
+    // - utilize more than one thread/core to avoid bottlenecks with sending requests
     let concurrency_levels = [4, 6, 8, 12, 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96, 128];
     let max_concurrency = concurrency_levels.last().cloned().unwrap();
     let mut tasks = Vec::new();
-
     let (results_tx, results_rx) = flume::unbounded::<Option<std::num::NonZeroU32>>();
-
     for concurrency in concurrency_levels {
         println!("Concurrency {}, warming up...", concurrency);
         // Gradually increase number of concurrent requests
@@ -79,9 +80,9 @@ async fn main() {
                         .body(r.body.clone())
                         .send()
                         .await;
-                    let elapsed = start.elapsed().as_micros();
+                    let elapsed_us = start.elapsed().as_micros();
                     let latency = if result.is_ok_and(|r| r.status().is_success()) {
-                        Some(std::num::NonZeroU32::new(elapsed as u32).unwrap())
+                        Some(std::num::NonZeroU32::new(elapsed_us as u32).unwrap())
                     } else {
                         None
                     };
