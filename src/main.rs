@@ -142,6 +142,10 @@ async fn main() {
 
 /// Parses the TCP header and extracts the HTTP request payload if present.
 fn get_tcp_data(data: &[u8]) -> Option<&[u8]> {
+    if data.len() < 36 {
+        return None;
+    }
+
     let tcp_packet = if u16::from_be_bytes([data[14], data[15]]) == 0x0800 {
         // For `-i any` tcpdump adds 2 bytes of something to the Ethernet frame
         &data[16..]
@@ -270,5 +274,11 @@ mod tests {
     #[test]
     fn count_peak_rps_test() {
         assert_eq!(count_peak_rps(vec![]), 0);
+    }
+
+    #[test]
+    fn get_tcp_data_test() {
+        assert_eq!(get_tcp_data(&[]), None);
+        assert_eq!(get_tcp_data(&[0; 36]), None);
     }
 }
