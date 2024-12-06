@@ -121,7 +121,7 @@ async fn main() {
         let p50 = latencies[(latencies.len() as f64 * 0.50) as usize] as f64 / 1000.0;
         let p95 = latencies[(latencies.len() as f64 * 0.95) as usize] as f64 / 1000.0;
         let p99 = latencies[(latencies.len() as f64 * 0.99) as usize] as f64 / 1000.0;
-        println!("- Latency p50: {p50}ms, p95: {p95}ms, p99: {p99}s");
+        println!("- Latency p50: {p50}ms, p95: {p95}ms, p99: {p99}ms");
     }
 
     // Close the channel to stop all tasks
