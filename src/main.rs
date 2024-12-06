@@ -17,7 +17,7 @@ struct Cli {
     /// Playbook file in .pcap format, captured via `tcpdump -i any dst port 8002 -w playbook.pcap`
     playbook: String,
 
-    /// The URL to send the request to
+    /// The URL to send the request to.
     /// Example: http://localhost:8002/route
     url: String,
 }
@@ -39,8 +39,8 @@ async fn main() {
     let status = reqwest::get(format!("{}/status", cli.url)).await;
     assert!(
         status.is_ok_and(|r| r.status().is_success()),
-        "{}/status failed",
-        cli.url
+        "HTTP request to '{}/status' failed",
+        cli.url,
     );
 
     let requests: Arc<[Request]> = parse_tcpdump(cli.playbook)
@@ -49,7 +49,7 @@ async fn main() {
 
     let client = reqwest::Client::new();
 
-    let concurrency_levels = [4, 6, 8, 12, 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96];
+    let concurrency_levels = [4, 6, 8, 12, 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96, 128];
     let max_concurrency = concurrency_levels.last().cloned().unwrap();
     let mut tasks = Vec::new();
 
