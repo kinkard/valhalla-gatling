@@ -8,7 +8,6 @@ fn main() {
         .inputs(
             glob("proto/*.proto")
                 .expect("Failed to read glob pattern")
-                .into_iter()
                 .flat_map(|result| match result {
                     Ok(path) => Some(path),
                     Err(e) => {

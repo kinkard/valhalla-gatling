@@ -87,7 +87,7 @@ async fn main() {
                     };
 
                     // Channel has been closed, stop sending results and exit the task
-                    if let Err(_) = results_tx.send(latency) {
+                    if results_tx.send(latency).is_err() {
                         break;
                     }
                 }
