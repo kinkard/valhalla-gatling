@@ -31,6 +31,16 @@ struct Request {
     body: Vec<u8>,
 }
 
+#[derive(Default)]
+struct Metric {
+    concurrency: u16,
+    throughput: f64,
+    success_rate: f64,
+    p50: f64,
+    p95: f64,
+    p99: f64,
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -56,6 +66,7 @@ async fn main() {
     let max_concurrency = concurrency_levels.last().cloned().unwrap();
     let mut tasks = Vec::new();
     let (results_tx, results_rx) = flume::unbounded::<Option<std::num::NonZeroU32>>();
+    let mut metrics = Vec::new();
     for concurrency in concurrency_levels {
         println!("Concurrency {}, warming up...", concurrency);
         // Gradually increase number of concurrent requests
@@ -108,6 +119,7 @@ async fn main() {
         let mut successfull = 0;
         let mut total = 0;
         let mut latencies = Vec::new();
+        let mut metric = Metric::default();
         while let Ok(latency) = results_rx.recv() {
             total += 1;
             if let Some(latency) = latency {
@@ -116,21 +128,23 @@ async fn main() {
             }
             let elapsed = start.elapsed();
             if elapsed.as_secs() >= 15 {
-                println!(
-                    "- Throughput: {:.2}rps ({}/{:.2}s), success rate {:.2}",
-                    total as f64 / elapsed.as_secs_f64(),
-                    total,
-                    elapsed.as_secs_f64(),
-                    successfull as f64 / total as f64
-                );
+                metric.throughput = total as f64 / elapsed.as_secs_f64();
+                metric.success_rate = successfull as f64 / total as f64;
                 break;
             }
         }
         latencies.sort_unstable();
-        let p50 = latencies[(latencies.len() as f64 * 0.50) as usize] as f64 / 1000.0;
-        let p95 = latencies[(latencies.len() as f64 * 0.95) as usize] as f64 / 1000.0;
-        let p99 = latencies[(latencies.len() as f64 * 0.99) as usize] as f64 / 1000.0;
-        println!("- Latency p50: {p50}ms, p95: {p95}ms, p99: {p99}ms");
+        metric.p50 = latencies[(latencies.len() as f64 * 0.50) as usize] as f64 / 1000.0;
+        metric.p95 = latencies[(latencies.len() as f64 * 0.95) as usize] as f64 / 1000.0;
+        metric.p99 = latencies[(latencies.len() as f64 * 0.99) as usize] as f64 / 1000.0;
+        metrics.push(metric);
+    }
+
+    for m in metrics {
+        println!(
+            "Concurrency {}, throughput {:.2}rps, success rate {:.2}, p50 {:.1}ms, p95 {:.1}ms, p99 {:.1}ms",
+            m.concurrency, m.throughput, m.success_rate, m.p50, m.p95, m.p99
+        );
     }
 
     // Close the channel to stop all tasks
