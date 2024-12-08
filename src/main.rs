@@ -125,6 +125,10 @@ async fn run(url: String, playbook: String) {
     );
 
     let playbook = Playbook::load(&playbook).expect("Failed to load playbook");
+    println!(
+        "Loaded {} HTTP requests from the playbook",
+        playbook.requests.len()
+    );
     let requests: Arc<[Request]> = Arc::from(playbook.requests);
 
     let client = reqwest::Client::new();
