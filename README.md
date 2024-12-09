@@ -16,7 +16,19 @@ If external IP address is `192.168.0.1` and port is `8002` (default Valhalla por
 sudo tcpdump -i any dst host 192.168.0.1 and dst port 8002 -w valhalla.pcap
 ```
 
+alternatively, filtering by network interface (see all via `ip a`) can be done
+
+```sh
+sudo tcpdump -i eth0 dst port 8002 -w valhalla.pcap
+```
+
 Note: Filtering by IP address can be skipped, but without it every packet will be captured 3 times if Valhalla is running in Docker:packet to the host, to the bridge and to the container.
+
+Then this tcpdump should be converted into a playbook (reducing the size of it in 100 times...)
+
+```sh
+cargo run --release -- extract valhalla.pcap -o valhalla.playbook
+```
 
 ## License
 
