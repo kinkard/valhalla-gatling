@@ -227,7 +227,7 @@ async fn run(url: String, playbook: String) {
 
     for m in metrics {
         println!(
-            "Concurrency {}, throughput {:.2}rps, success rate {:.2}, p50 {:.1}ms, p95 {:.1}ms, p99 {:.1}ms",
+            "Concurrency {}: throughput {:.2}rps, success rate {:.2}, p50 {:.1}ms, p95 {:.1}ms, p99 {:.1}ms",
             m.concurrency, m.throughput, m.success_rate, m.p50, m.p95, m.p99
         );
     }
