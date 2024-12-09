@@ -218,6 +218,7 @@ async fn run(url: String, playbook: String) {
             }
         }
         latencies.sort_unstable();
+        metric.concurrency = concurrency as u16;
         metric.p50 = latencies[(latencies.len() as f64 * 0.50) as usize] as f64 / 1000.0;
         metric.p95 = latencies[(latencies.len() as f64 * 0.95) as usize] as f64 / 1000.0;
         metric.p99 = latencies[(latencies.len() as f64 * 0.99) as usize] as f64 / 1000.0;
