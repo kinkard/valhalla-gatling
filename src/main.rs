@@ -175,12 +175,11 @@ async fn run(url: String, playbook: String, max_concurrency: usize) {
     let concurrency_levels = [4, 6, 8, 12, 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96, 128];
     let mut tasks = Vec::new();
     let (results_tx, results_rx) = flume::unbounded::<Option<std::num::NonZeroU32>>();
-    let mut metrics = Vec::new();
+    let mut measure_cold_start = true;
     for concurrency in concurrency_levels
         .into_iter()
         .take_while(|c| *c <= max_concurrency)
     {
-        println!("Concurrency {}, warming up...", concurrency);
         // Gradually increase number of concurrent requests
         for task_idx in tasks.len()..concurrency {
             let client = client.clone();
@@ -214,7 +213,42 @@ async fn run(url: String, playbook: String, max_concurrency: usize) {
             }));
         }
 
+        // todo: remove copy&paste with logic below
+        if measure_cold_start {
+            measure_cold_start = false;
+
+            let start = std::time::Instant::now();
+            let mut successfull = 0;
+            let mut total = 0;
+            let mut latencies = Vec::new();
+            let mut metric = Metric::default();
+            while let Ok(latency) = results_rx.recv() {
+                total += 1;
+                if let Some(latency) = latency {
+                    successfull += 1;
+                    latencies.push(latency.get());
+                }
+                let elapsed = start.elapsed();
+                if elapsed.as_secs() >= 5 {
+                    metric.throughput = total as f64 / elapsed.as_secs_f64();
+                    metric.success_rate = successfull as f64 / total as f64;
+                    break;
+                }
+            }
+            latencies.sort_unstable();
+            metric.concurrency = concurrency as u16;
+            metric.p50 = latencies[(latencies.len() as f64 * 0.50) as usize] as f64 / 1000.0;
+            metric.p95 = latencies[(latencies.len() as f64 * 0.95) as usize] as f64 / 1000.0;
+            metric.p99 = latencies[(latencies.len() as f64 * 0.99) as usize] as f64 / 1000.0;
+
+            println!(
+                "Cold start with concurrency {}: throughput {:.2}rps, success rate {:.2}, p50 {:.1}ms, p95 {:.1}ms, p99 {:.1}ms",
+                metric.concurrency, metric.throughput, metric.success_rate, metric.p50, metric.p95, metric.p99
+            );
+        }
+
         // First 15s read all results and throw them away
+        print!("Concurrency {}, warming up...", concurrency);
         let start = std::time::Instant::now();
         while let Ok(_latency) = results_rx.recv() {
             if start.elapsed().as_secs() >= 15 {
@@ -246,13 +280,9 @@ async fn run(url: String, playbook: String, max_concurrency: usize) {
         metric.p50 = latencies[(latencies.len() as f64 * 0.50) as usize] as f64 / 1000.0;
         metric.p95 = latencies[(latencies.len() as f64 * 0.95) as usize] as f64 / 1000.0;
         metric.p99 = latencies[(latencies.len() as f64 * 0.99) as usize] as f64 / 1000.0;
-        metrics.push(metric);
-    }
-
-    for m in metrics {
         println!(
-            "Concurrency {}: throughput {:.2}rps, success rate {:.2}, p50 {:.1}ms, p95 {:.1}ms, p99 {:.1}ms",
-            m.concurrency, m.throughput, m.success_rate, m.p50, m.p95, m.p99
+            "\rConcurrency {}: throughput {:.2}rps, success rate {:.2}, p50 {:.1}ms, p95 {:.1}ms, p99 {:.1}ms",
+            metric.concurrency, metric.throughput, metric.success_rate, metric.p50, metric.p95, metric.p99
         );
     }
 
