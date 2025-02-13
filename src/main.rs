@@ -14,6 +14,9 @@ mod proto {
     include!(concat!(env!("OUT_DIR"), "/proto/mod.rs"));
 }
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {

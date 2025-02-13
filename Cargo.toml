@@ -15,8 +15,9 @@ lto = "thin"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-flexbuffers = "2.0.0"
-flume = "0.11.1"
+flexbuffers = "25"
+flume = "0.11"
+mimalloc = "0.1"
 pcap-parser = "0.16"
 protobuf = "3.5.1"
 reqwest = { version = "0.12" }
