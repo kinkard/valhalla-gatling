@@ -152,7 +152,7 @@ fn extract(tcpdump: String, output: Option<String>) {
     playbook.save(&output).expect("Failed to save playbook");
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
 async fn run(url: String, playbook: String, max_concurrency: usize) {
     let playbook = Playbook::load(&playbook).expect("Failed to load playbook");
     println!(
