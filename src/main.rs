@@ -248,7 +248,6 @@ async fn run(url: String, playbook: String, max_concurrency: usize) {
         }
 
         // First 15s read all results and throw them away
-        print!("Concurrency {}, warming up...", concurrency);
         let start = std::time::Instant::now();
         while let Ok(_latency) = results_rx.recv() {
             if start.elapsed().as_secs() >= 15 {
@@ -281,7 +280,7 @@ async fn run(url: String, playbook: String, max_concurrency: usize) {
         metric.p95 = latencies[(latencies.len() as f64 * 0.95) as usize] as f64 / 1000.0;
         metric.p99 = latencies[(latencies.len() as f64 * 0.99) as usize] as f64 / 1000.0;
         println!(
-            "\rConcurrency {}: throughput {:.2}rps, success rate {:.2}, p50 {:.1}ms, p95 {:.1}ms, p99 {:.1}ms",
+            "Concurrency {}: throughput {:.2}rps, success rate {:.2}, p50 {:.1}ms, p95 {:.1}ms, p99 {:.1}ms",
             metric.concurrency, metric.throughput, metric.success_rate, metric.p50, metric.p95, metric.p99
         );
     }
