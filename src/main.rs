@@ -64,10 +64,37 @@ impl From<HttpMethod> for reqwest::Method {
 struct Request {
     /// HTTP request type like `GET` or `POST`
     method: HttpMethod,
+    /// Request endpoint with parameters like `/route` or `/route?json={...}`
+    uri: Box<str>,
     /// HTTP request headers like `Content-Type` or `Accept-Encoding`
-    headers: Vec<(String, String)>,
+    headers: Box<[(Box<str>, Box<str>)]>,
     /// HTTP request body
-    body: Vec<u8>,
+    body: Box<[u8]>,
+}
+
+impl Request {
+    async fn send(
+        &self,
+        client: &reqwest::Client,
+        base_url: &str,
+    ) -> Result<reqwest::Response, reqwest::Error> {
+        client
+            .request(self.method.into(), format!("{}{}", base_url, &self.uri))
+            .headers(
+                self.headers
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            HeaderName::from_str(k).unwrap(),
+                            HeaderValue::from_str(v).unwrap(),
+                        )
+                    })
+                    .collect(),
+            )
+            .body(self.body.to_vec())
+            .send()
+            .await
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -120,13 +147,6 @@ fn extract(tcpdump: String, output: Option<String>) {
 
 #[tokio::main]
 async fn run(url: String, playbook: String) {
-    // Test url against `/status` endpoint to ensure that Valhalla server is running
-    let status = reqwest::get(format!("{url}/status")).await;
-    assert!(
-        status.is_ok_and(|r| r.status().is_success()),
-        "HTTP request to '{url}/status' failed",
-    );
-
     let playbook = Playbook::load(&playbook).expect("Failed to load playbook");
     println!(
         "Loaded {} HTTP requests from the playbook",
@@ -136,8 +156,14 @@ async fn run(url: String, playbook: String) {
 
     let client = reqwest::Client::new();
 
+    // Try to send a single request to check if the server is up
+    let _ = requests[0]
+        .send(&client, &url)
+        .await
+        .expect("Failed to send a test request");
+
     // Doing concurrent requests via spawning tasks allows us to
-    // - gradually increase the number of concurrent requests without pauses
+    // - gradually increase the number of concurrent requests without pauses, thus keeping the server warm
     // - utilize more than one thread/core to avoid bottlenecks with sending requests
     let concurrency_levels = [4, 6, 8, 12, 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96, 128];
     let max_concurrency = concurrency_levels.last().cloned().unwrap();
@@ -147,7 +173,7 @@ async fn run(url: String, playbook: String) {
     for concurrency in concurrency_levels {
         println!("Concurrency {}, warming up...", concurrency);
         // Gradually increase number of concurrent requests
-        for tasl_idx in tasks.len()..concurrency {
+        for task_idx in tasks.len()..concurrency {
             let client = client.clone();
             let url = url.clone();
             let requests = requests.clone();
@@ -158,26 +184,12 @@ async fn run(url: String, playbook: String) {
                 let requests = requests
                     .iter()
                     .cycle()
-                    .skip(tasl_idx)
+                    .skip(task_idx)
                     .step_by(max_concurrency);
                 for r in requests {
                     let start = std::time::Instant::now();
-                    let result = client
-                        .request(r.method.into(), &url)
-                        .headers(
-                            r.headers
-                                .iter()
-                                .map(|(k, v)| {
-                                    (
-                                        HeaderName::from_str(k).unwrap(),
-                                        HeaderValue::from_str(v).unwrap(),
-                                    )
-                                })
-                                .collect(),
-                        )
-                        .body(r.body.clone())
-                        .send()
-                        .await;
+                    let result = r.send(&client, &url).await;
+
                     let elapsed_us = start.elapsed().as_micros();
                     let latency = if result.is_ok_and(|r| r.status().is_success()) {
                         Some(std::num::NonZeroU32::new(elapsed_us as u32).unwrap())
@@ -282,48 +294,18 @@ fn get_tcp_data(data: &[u8]) -> Option<&[u8]> {
     Some(&tcp_packet[data_offset..])
 }
 
-fn parse_tcpdump(path: String) -> Result<Vec<Request>> {
+/// Traverses the TCP dump file and extracts TCP data (payload) from the packets.
+fn traverse_tcpdump(path: String, mut callback: impl FnMut(u64, &[u8])) -> Result<()> {
     let file = File::open(path).context("Failed to open pcap file")?;
     let mut reader = LegacyPcapReader::new(65536, file).context("Failed to read pcap file")?;
-    let mut requests = vec![];
-
-    // Array of timestamps to calculate the requests per second
-    let mut timestamps = vec![];
 
     loop {
         match reader.next() {
             Ok((offset, data)) => {
                 if let PcapBlockOwned::Legacy(block) = data {
                     if let Some(tcp_data) = get_tcp_data(block.data) {
-                        if let Ok(api) = proto::api::Api::parse_from_bytes(tcp_data) {
-                            if let proto::options::options::Action::route =
-                                api.options.action.enum_value_or_default()
-                            {
-                                // Convert the timestamp to microseconds
-                                timestamps
-                                    .push(block.ts_sec as u64 * 1_000_000 + block.ts_usec as u64);
-
-                                // todo: actually, parse headers from the previous tcp packet
-                                requests.push(Request {
-                                    method: HttpMethod::GET,
-                                    headers: [
-                                        (header::CONTENT_TYPE, "application/x-protobuf"),
-                                        (header::ACCEPT_ENCODING, "gzip, deflate"),
-                                    ]
-                                    .into_iter()
-                                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                                    .collect(),
-                                    body: api.write_to_bytes().unwrap(),
-                                });
-
-                                // if let Some(method) = tcp_data
-                                //     .position(|b| b == b' ')
-                                //     .and_then(|pos| Method::from_bytes(&tcp_data[..pos]).ok())
-                                // {
-                                //     // and then parse the headers and body
-                                // }
-                            }
-                        }
+                        let ts_us = block.ts_sec as u64 * 1_000_000 + block.ts_usec as u64;
+                        callback(ts_us, tcp_data);
                     }
                 }
                 reader.consume(offset);
@@ -336,12 +318,60 @@ fn parse_tcpdump(path: String) -> Result<Vec<Request>> {
         }
     }
 
+    Ok(())
+}
+
+fn parse_tcpdump(path: String) -> Result<Vec<Request>> {
+    // Array of timestamps to calculate the requests per second
+    let mut timestamps = vec![];
+    let mut requests = vec![];
+
+    traverse_tcpdump(path, |ts_us, tcp_data| {
+        if let Ok(http_request) = std::str::from_utf8(tcp_data) {
+            if let Some(uri) = http_request.split(' ').nth(1) {
+                if uri.starts_with("/route/v1") {
+                    timestamps.push(ts_us);
+
+                    requests.push(Request {
+                        method: HttpMethod::GET,
+                        uri: uri.into(),
+                        headers: Default::default(),
+                        body: Default::default(),
+                    });
+                }
+            }
+        }
+
+        if let Ok(api) = proto::api::Api::parse_from_bytes(tcp_data) {
+            if let proto::options::options::Action::route =
+                api.options.action.enum_value_or_default()
+            {
+                timestamps.push(ts_us);
+
+                requests.push(Request {
+                    method: HttpMethod::GET,
+                    uri: "/route".into(),
+                    headers: [
+                        (header::CONTENT_TYPE, "application/x-protobuf"),
+                        (header::ACCEPT_ENCODING, "gzip, deflate"),
+                    ]
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string().into_boxed_str(), v.into()))
+                    .collect::<Vec<_>>()
+                    .into(),
+                    body: api.write_to_bytes().unwrap().into(),
+                });
+            }
+        }
+    })?;
+
     let duration_s =
         (timestamps.last().unwrap_or(&0) - timestamps.first().unwrap_or(&0)) as f64 / 1_000_000.0;
     let peak_rps = count_peak_rps(timestamps);
     println!(
-        "Parsed {} requests ({duration_s:.1}s), average {:.2}rps, peak {peak_rps}rps",
+        "Parsed {} requests ({}), average {:.2}rps, peak {peak_rps}rps",
         requests.len(),
+        nice_seconds_format(duration_s),
         requests.len() as f64 / duration_s,
     );
 
@@ -370,6 +400,22 @@ fn count_peak_rps(mut timestamps: Vec<u64>) -> usize {
     max_rps
 }
 
+fn nice_seconds_format(seconds: f64) -> String {
+    let minutes_sec = seconds % 3600.0;
+    let hours = (seconds - minutes_sec) / 3600.0;
+
+    let seconds = minutes_sec % 60.0;
+    let minutes = (minutes_sec - seconds) / 60.0;
+
+    if hours != 0.0 {
+        format!("{:.0}h {:.0}m", hours, minutes)
+    } else if minutes != 0.0 {
+        format!("{:.0}m {:.0}s", minutes, seconds)
+    } else {
+        format!("{:.1}s", seconds)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,8 +436,9 @@ mod tests {
         let playbook = Playbook {
             requests: vec![Request {
                 method: HttpMethod::GET,
-                headers: vec![("Content-Type".to_string(), "application/json".to_string())],
-                body: vec![1, 2, 3],
+                uri: "/route".into(),
+                headers: vec![("Content-Type".into(), "application/json".into())].into(),
+                body: vec![1, 2, 3].into(),
             }],
         };
         let path = "/tmp/test.playbook";
@@ -404,8 +451,24 @@ mod tests {
             .zip(loaded_playbook.requests.iter())
         {
             assert_eq!(r1.method, r2.method);
+            assert_eq!(r1.uri, r2.uri);
             assert_eq!(r1.headers, r2.headers);
             assert_eq!(r1.body, r2.body);
         }
+    }
+
+    #[test]
+    fn nice_seconds_format_test() {
+        assert_eq!(nice_seconds_format(0.0), "0.0s");
+        assert_eq!(nice_seconds_format(1.1), "1.1s");
+        assert_eq!(nice_seconds_format(62.6), "1m 3s");
+        assert_eq!(nice_seconds_format(3600.0), "1h 0m");
+        assert_eq!(nice_seconds_format(3725.56), "1h 2m");
+        assert_eq!(nice_seconds_format(39241.5), "10h 54m");
+
+        // That's weird, but why not? It is defeniately better than panic.
+        assert_eq!(nice_seconds_format(-1.33), "-1.3s");
+        assert_eq!(nice_seconds_format(-1111.33), "-18m -31s");
+        assert_eq!(nice_seconds_format(-39241.5), "-10h -54m");
     }
 }

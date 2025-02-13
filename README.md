@@ -5,7 +5,7 @@ This project is a simple tool to measure the latency and throughput of Valhalla 
 ## Build & Run
 
 ```sh
-cargo run --release
+cargo run --release -- --help
 ```
 
 ## Playbook
@@ -24,10 +24,16 @@ sudo tcpdump -i eth0 dst port 8002 -w valhalla.pcap
 
 Note: Filtering by IP address can be skipped, but without it every packet will be captured 3 times if Valhalla is running in Docker:packet to the host, to the bridge and to the container.
 
-Then this tcpdump should be converted into a playbook (reducing the size of it in 100 times...)
+Then this tcpdump should be converted into a playbook (reducing the size of it in 10..100 times...)
 
 ```sh
 cargo run --release -- extract valhalla.pcap -o valhalla.playbook
+```
+
+And finally the playbook can be used to measure the latency and throughput
+
+```sh
+cargo run --release -- run http://localhost:8002 valhalla.playbook
 ```
 
 ## License
