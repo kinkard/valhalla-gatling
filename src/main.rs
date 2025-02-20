@@ -3,8 +3,8 @@ use clap::{Parser, Subcommand};
 use pcap_parser::traits::PcapReaderIterator;
 use pcap_parser::*;
 use protobuf::Message;
-use reqwest::header::{self, HeaderName, HeaderValue};
 use reqwest::Method;
+use reqwest::header::{self, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::str::FromStr;
@@ -50,15 +50,15 @@ enum Commands {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 enum HttpMethod {
-    GET,
-    POST,
+    Get,
+    Post,
 }
 
 impl From<HttpMethod> for reqwest::Method {
     fn from(method: HttpMethod) -> Self {
         match method {
-            HttpMethod::GET => Method::GET,
-            HttpMethod::POST => Method::POST,
+            HttpMethod::Get => Method::GET,
+            HttpMethod::Post => Method::POST,
         }
     }
 }
@@ -243,7 +243,12 @@ async fn run(url: String, playbook: String, max_concurrency: usize) {
 
             println!(
                 "Cold start with concurrency {}: throughput {:.2}rps, success rate {:.2}, p50 {:.1}ms, p95 {:.1}ms, p99 {:.1}ms",
-                metric.concurrency, metric.throughput, metric.success_rate, metric.p50, metric.p95, metric.p99
+                metric.concurrency,
+                metric.throughput,
+                metric.success_rate,
+                metric.p50,
+                metric.p95,
+                metric.p99
             );
         }
 
@@ -281,7 +286,12 @@ async fn run(url: String, playbook: String, max_concurrency: usize) {
         metric.p99 = latencies[(latencies.len() as f64 * 0.99) as usize] as f64 / 1000.0;
         println!(
             "Concurrency {}: throughput {:.2}rps, success rate {:.2}, p50 {:.1}ms, p95 {:.1}ms, p99 {:.1}ms",
-            metric.concurrency, metric.throughput, metric.success_rate, metric.p50, metric.p95, metric.p99
+            metric.concurrency,
+            metric.throughput,
+            metric.success_rate,
+            metric.p50,
+            metric.p95,
+            metric.p99
         );
     }
 
@@ -371,7 +381,7 @@ fn parse_tcpdump(path: String) -> Result<Vec<Request>> {
                     timestamps.push(ts_us);
 
                     requests.push(Request {
-                        method: HttpMethod::GET,
+                        method: HttpMethod::Get,
                         uri: uri.into(),
                         headers: Default::default(),
                         body: Default::default(),
@@ -387,7 +397,7 @@ fn parse_tcpdump(path: String) -> Result<Vec<Request>> {
                 timestamps.push(ts_us);
 
                 requests.push(Request {
-                    method: HttpMethod::GET,
+                    method: HttpMethod::Get,
                     uri: "/route".into(),
                     headers: [
                         (header::CONTENT_TYPE, "application/x-protobuf"),
@@ -473,7 +483,7 @@ mod tests {
     fn save_load_playbook_test() {
         let playbook = Playbook {
             requests: vec![Request {
-                method: HttpMethod::GET,
+                method: HttpMethod::Get,
                 uri: "/route".into(),
                 headers: vec![("Content-Type".into(), "application/json".into())].into(),
                 body: vec![1, 2, 3].into(),
