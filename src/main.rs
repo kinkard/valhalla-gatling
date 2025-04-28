@@ -50,6 +50,10 @@ enum Commands {
         /// Maximum number of concurrent requests to send.
         #[arg(short, long, default_value = "128")]
         concurrency: u8,
+        /// Additional HTTP headers to include with each request (format: "Name:Value").
+        /// Useful if additional authentication is required.
+        #[arg(short, long)]
+        header: Vec<String>,
     },
 }
 
@@ -150,7 +154,8 @@ fn main() {
             url,
             playbook,
             concurrency,
-        } => run(url, playbook, concurrency as usize),
+            header,
+        } => run(url, playbook, concurrency as usize, header),
     }
 }
 
@@ -176,12 +181,40 @@ fn extract(tcpdumps: Vec<String>, output: Option<String>, randomize: bool) {
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 8)]
-async fn run(url: String, playbook: String, max_concurrency: usize) {
-    let playbook = Playbook::load(&playbook).expect("Failed to load playbook");
+async fn run(
+    url: String,
+    playbook: String,
+    max_concurrency: usize,
+    additional_headers: Vec<String>,
+) {
+    let mut playbook = Playbook::load(&playbook).expect("Failed to load playbook");
     println!(
         "Loaded {} HTTP requests from the playbook",
         playbook.requests.len()
     );
+
+    let additional_headers = additional_headers
+        .iter()
+        .filter_map(|header_str| {
+            if let Some((key, value)) = header_str.split_once(':') {
+                Some((key.trim().into(), value.trim().into()))
+            } else {
+                eprintln!(
+                    "Warning: Invalid header format '{}', skipping. Expected format: 'Name:Value'",
+                    header_str
+                );
+                None
+            }
+        })
+        .collect::<Vec<(Box<str>, Box<str>)>>();
+    if !additional_headers.is_empty() {
+        for r in &mut playbook.requests {
+            let mut new_headers = Vec::from(r.headers.as_ref());
+            new_headers.extend(additional_headers.iter().cloned());
+            r.headers = new_headers.into_boxed_slice();
+        }
+    }
+
     let requests: Arc<[Request]> = Arc::from(playbook.requests);
 
     let client = reqwest::Client::new();
