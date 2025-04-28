@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use pcap_parser::traits::PcapReaderIterator;
 use pcap_parser::*;
 use protobuf::Message;
+use rand::{rng, seq::SliceRandom};
 use reqwest::Method;
 use reqwest::header::{self, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,9 @@ enum Commands {
         /// Optional output file name. If not provided, the default name is equal to the input file name with the `.playbook` extension.
         #[arg(short, long)]
         output: Option<String>,
+        /// Randomize the order of requests in the playbook.
+        #[arg(long)]
+        randomize: bool,
     },
 
     /// Sends the requests to the specified URL and measures the throughput, success rate and latency percentiles.
@@ -137,7 +141,11 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Extract { tcpdump, output } => extract(tcpdump, output),
+        Commands::Extract {
+            tcpdump,
+            output,
+            randomize,
+        } => extract(tcpdump, output, randomize),
         Commands::Run {
             url,
             playbook,
@@ -146,7 +154,7 @@ fn main() {
     }
 }
 
-fn extract(tcpdumps: Vec<String>, output: Option<String>) {
+fn extract(tcpdumps: Vec<String>, output: Option<String>, randomize: bool) {
     let output = output.unwrap_or_else(|| format!("{}.playbook", tcpdumps[0]));
     let mut requests = Vec::new();
 
@@ -157,6 +165,12 @@ fn extract(tcpdumps: Vec<String>, output: Option<String>) {
     }
 
     println!("Total requests extracted: {}", requests.len());
+
+    if randomize {
+        println!("Randomizing request order...");
+        requests.shuffle(&mut rng());
+    }
+
     let playbook = Playbook { requests };
     playbook.save(&output).expect("Failed to save playbook");
 }
