@@ -26,10 +26,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Extracts `/route` Valhalla requests from the specified .pcap file.
+    /// Extracts `/route` Valhalla or OSRM requests from the specified .pcap file.
     Extract {
         /// Path to the .pcap file to extract the requests from, usually captured via `tcpdump`.
-        tcpdump: String,
+        #[arg(required = true)]
+        tcpdump: Vec<String>,
         /// Optional output file name. If not provided, the default name is equal to the input file name with the `.playbook` extension.
         #[arg(short, long)]
         output: Option<String>,
@@ -145,9 +146,17 @@ fn main() {
     }
 }
 
-fn extract(tcpdump: String, output: Option<String>) {
-    let output = output.unwrap_or_else(|| format!("{}.playbook", tcpdump));
-    let requests = parse_tcpdump(tcpdump).expect("Failed to parse tcpdump");
+fn extract(tcpdumps: Vec<String>, output: Option<String>) {
+    let output = output.unwrap_or_else(|| format!("{}.playbook", tcpdumps[0]));
+    let mut requests = Vec::new();
+
+    for tcpdump in tcpdumps {
+        println!("Parsing {tcpdump}...");
+        let mut r = parse_tcpdump(tcpdump).expect("Failed to parse tcpdump");
+        requests.append(&mut r);
+    }
+
+    println!("Total requests extracted: {}", requests.len());
     let playbook = Playbook { requests };
     playbook.save(&output).expect("Failed to save playbook");
 }
