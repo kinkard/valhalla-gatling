@@ -371,6 +371,9 @@ fn get_tcp_data(data: &[u8]) -> Option<&[u8]> {
     } else if u16::from_be_bytes([data[12], data[13]]) == 0x0800 {
         // In regular Ethernet frames the Ethernet header is 14 bytes long
         &data[14..]
+    } else if u16::from_be_bytes([data[0], data[1]]) == 0x0800 {
+        // Seems it is SLL (Linux cooked capture) format that tcpdump captures if running inside a k8s pod
+        &data[20..]
     } else {
         println!("Not a Ethernet Type II frame start: {:02x?}.", &data[..16]);
         return None;
