@@ -19,6 +19,7 @@ flexbuffers = "25"
 flume = "0.11"
 mimalloc = "0.1"
 pcap-parser = "0.16"
+polyline-iter = "0.3.0"
 protobuf = "3.5.1"
 rand = "0.9"
 reqwest = { version = "0.12" }

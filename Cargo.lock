@@ -992,6 +992,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
+name = "polyline-iter"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85910ace0a44ffbe22016a86e0ff9ac719ce173b7138953a8e512c639e923dda"
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1730,6 +1736,7 @@ dependencies = [
  "glob",
  "mimalloc",
  "pcap-parser",
+ "polyline-iter",
  "pretty_assertions",
  "protobuf",
  "protobuf-codegen",
