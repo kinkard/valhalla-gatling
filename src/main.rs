@@ -487,7 +487,10 @@ fn traverse_tcpdump(path: String, mut callback: impl FnMut(u64, &[u8])) -> Resul
             Err(PcapError::Incomplete(_)) => {
                 reader.refill().unwrap();
             }
-            Err(e) => panic!("error while reading: {:?}", e),
+            Err(e) => {
+                println!("Finished parsing with error: {e:?}");
+                break;
+            }
         }
     }
 
